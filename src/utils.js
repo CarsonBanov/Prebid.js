@@ -464,11 +464,8 @@ export function flatten(a, b) {
   return a.concat(b);
 }
 
-export function getBidderRequest({ adId }) {
-  return pbjs.auctions.map(auction => auction.getBidderRequests()
-    .find(request => request.bids
-      .find(bid => bid.adId === adId)))
-    .reduce((a, b) => a || b);
+export function findBidderRequestByBidId() {
+  return pbjs.auctionManager.findBidderRequestByBidId(...arguments);
 }
 
 export function getKeys(obj) {
@@ -501,4 +498,8 @@ export function getHighestCpm(previous, current) {
 
 export function getUniqueIdentifierStr() {
   exports.getUniqueIdentifierStr();
+}
+
+export function findAuctionByBidderCode() {
+  return pbjs.auctionManager.findAuctionByBidderCode(...arguments);
 }

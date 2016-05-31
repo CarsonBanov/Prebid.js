@@ -1,4 +1,4 @@
-import { uniques, getBidderRequest } from './utils';
+import { uniques, findBidderRequestByBidId } from './utils';
 
 var CONSTANTS = require('./constants.json');
 var utils = require('./utils.js');
@@ -20,11 +20,11 @@ const _hgPriceCap = 20.00;
  * Returns a list of bidders that we haven't received a response yet
  * @return {array} [description]
  */
-exports.getTimedOutBidders = function () {
-  return pbjs._bidsRequested
+exports.getTimedOutBidders = function (auction) {
+  return auction.getBidderRequests()
     .map(getBidderCodes)
     .filter(uniques)
-    .filter(bidder => pbjs._bidsReceived
+    .filter(bidder => auction.getBidsReceived()
       .map(getBidders)
       .filter(uniques)
       .indexOf(bidder) < 0);
@@ -40,34 +40,36 @@ function getBidders(bid) {
   return bid.bidder;
 }
 
-function bidsBackAdUnit(adUnitCode) {
+function bidsBackForAdUnit({ adUnitCode, auction }) {
   const requested = pbjs.adUnits.find(unit => unit.code === adUnitCode).bids.length;
-  const received = pbjs._bidsReceived.filter(bid => bid.adUnitCode === adUnitCode).length;
+  const received = auction.getBidsReceived().filter(bid => bid.adUnitCode === adUnitCode).length;
   return requested === received;
 }
 
-function add(a, b) {
+function sum(a, b) {
   return a + b;
 }
 
-function bidsBackAll() {
-  const requested = pbjs._bidsRequested.map(bidSet => bidSet.bids.length).reduce(add);
-  const received = pbjs._bidsReceived.length;
+function bidsBackAll(auction) {
+  const requested = auction.getBidderRequests().map(bidSet => bidSet.bids.length).reduce(sum);
+  const received = auction.getBidsReceived().length;
   return requested === received;
 }
 
-exports.bidsBackAll = function() {
-  return bidsBackAll();
+// exports object
+
+exports.bidsBackForAdUnit = function() {
+  return bidsBackForAdUnit();
 };
 
 /*
  *   This function should be called to by the bidder adapter to register a bid response
  */
-exports.addBidResponse = function (adUnitCode, bid) {
+exports.addBidResponse = function (adUnitCode, bid, auction) {
   if (bid) {
     Object.assign(bid, {
       responseTimestamp: timestamp(),
-      requestTimestamp: getBidderRequest(bid).start,
+      requestTimestamp: findBidderRequestByBidId(bid).start,
       cpm: bid.cpm || 0,
       bidder: bid.bidderCode,
       adUnitCode
@@ -95,10 +97,10 @@ exports.addBidResponse = function (adUnitCode, bid) {
       bid.adserverTargeting = keyValues;
     }
 
-    pbjs._bidsReceived.push(bid);
+    auction.getBidsReceived().push(bid);
   }
 
-  if (bidsBackAdUnit(bid.adUnitCode)) {
+  if (bidsBackForAdUnit(bid.adUnitCode)) {
     triggerAdUnitCallbacks(bid.adUnitCode);
   }
 
@@ -137,7 +139,7 @@ function getKeyValueTargetingPairs(bidderCode, custBidObj) {
             val: function (bidResponse) {
               if (_granularity === CONSTANTS.GRANULARITY_OPTIONS.AUTO) {
                 return bidResponse.pbAg;
-              } else  if (_granularity === CONSTANTS.GRANULARITY_OPTIONS.DENSE) {
+              } else if (_granularity === CONSTANTS.GRANULARITY_OPTIONS.DENSE) {
                 return bidResponse.pbDg;
               } else if (_granularity === CONSTANTS.GRANULARITY_OPTIONS.LOW) {
                 return bidResponse.pbLg;
@@ -221,31 +223,29 @@ exports.registerDefaultBidderSetting = function (bidderCode, defaultSetting) {
   defaultBidderSettingsMap[bidderCode] = defaultSetting;
 };
 
-exports.executeCallback = function () {
+exports.executeCallback = function (auction) {
   if (externalCallbackArr.called !== true) {
-    processCallbacks(externalCallbackArr);
+    processCallbacks(externalCallbackArr, auction);
     externalCallbackArr.called = true;
   }
 
   //execute one time callback
   if (externalOneTimeCallback) {
-    processCallbacks([externalOneTimeCallback]);
+    processCallbacks([externalOneTimeCallback], auction);
     externalOneTimeCallback = null;
   }
 };
 
-function triggerAdUnitCallbacks(adUnitCode) {
-  //todo : get bid responses and send in args
-  var params = [adUnitCode];
-  processCallbacks(externalCallbackByAdUnitArr, params);
+function triggerAdUnitCallbacks(adUnitCode, auction) {
+  processCallbacks(externalCallbackByAdUnitArr, auction);
 }
 
-function processCallbacks(callbackQueue) {
+function processCallbacks(callbackQueue, auction) {
   var i;
   if (utils.isArray(callbackQueue)) {
     for (i = 0; i < callbackQueue.length; i++) {
       var func = callbackQueue[i];
-      func.call(pbjs, pbjs._bidsReceived);
+      func.call(pbjs, auction.getBidsReceived());
     }
   }
 }

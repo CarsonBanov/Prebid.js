@@ -2,11 +2,7 @@
 
 import 'polyfill';
 import { flatten, uniques, getKeys, isGptPubadsDefined, getHighestCpm } from './utils';
-import { Auctioneer } from './auctioneer';
-
-var auctioneer = new Auctioneer();
-var auction1 = auctioneer.holdAuction();
-var auction2 = auctioneer.holdAuction();
+import { auctionManager } from './auctionManager';
 
 // if pbjs already exists in global document scope, use it, if not, create the object
 window.pbjs = (window.pbjs || {});
@@ -37,8 +33,6 @@ var eventValidators = {
 };
 
 /* Public vars */
-
-pbjs.auctions = [auction1, auction2];
 
 //default timeout for all bids
 pbjs.bidderTimeout = pbjs.bidderTimeout || 2000;
@@ -92,8 +86,8 @@ function timeOutBidders() {
   }
 }
 
-function checkDefinedPlacement(id) {
-  var placementCodes = pbjs._bidsRequested.map(bidSet => bidSet.bids.map(bid => bid.placementCode))
+function checkDefinedPlacement(id, auction) {
+  var placementCodes = auction.getBidderRequests().map(bidSet => bidSet.bids.map(bid => bid.placementCode))
     .reduce(flatten)
     .filter(uniques);
 
@@ -105,7 +99,7 @@ function checkDefinedPlacement(id) {
   return true;
 }
 
-function getWinningBidTargeting() {
+function getWinningBidTargeting(auction) {
   let presets;
   if (isGptPubadsDefined()) {
     presets = (function getPresetTargeting() {
@@ -119,9 +113,9 @@ function getWinningBidTargeting() {
     })();
   }
 
-  let winners = pbjs._bidsReceived.map(bid => bid.adUnitCode)
+  let winners = auction.getBidsReceived().map(bid => bid.adUnitCode)
     .filter(uniques)
-    .map(adUnitCode => pbjs._bidsReceived
+    .map(adUnitCode => auction.getBidsReceived()
       .filter(bid => bid.adUnitCode === adUnitCode ? bid : null)
       .reduce(getHighestCpm,
         {
@@ -147,10 +141,10 @@ function getWinningBidTargeting() {
   return winners;
 }
 
-function getBidLandscapeTargeting() {
+function getBidLandscapeTargeting(auction) {
   const standardKeys = CONSTANTS.TARGETING_KEYS;
 
-  return pbjs._bidsReceived.map(bid => {
+  return auction.getBidsReceived().map(bid => {
     if (bid.adserverTargeting) {
       return {
         [bid.adUnitCode]: standardKeys.map(key => {
@@ -163,8 +157,8 @@ function getBidLandscapeTargeting() {
   }).filter(bid => bid); // removes empty elements in array
 }
 
-function getAllTargeting() {
-  return getWinningBidTargeting().concat(pb_sendAllBids ? getBidLandscapeTargeting() : []);
+function getAllTargeting(auction) {
+  return getWinningBidTargeting(auction).concat(pb_sendAllBids ? getBidLandscapeTargeting(auction) : []);
 }
 
 //////////////////////////////////
@@ -198,10 +192,12 @@ pbjs.getAdserverTargetingForAdUnitCodeStr = function (adunitCode) {
  * @return {object}  returnObj return bids
  */
 
-pbjs.getAdserverTargetingForAdUnitCode = function (adUnitCode) {
+pbjs.getAdserverTargetingForAdUnitCode = function (adUnitCode, auction) {
+  // todo validate params, type check auction
+
   utils.logInfo('Invoking pbjs.getAdserverTargetingForAdUnitCode', arguments);
 
-  return getAllTargeting().filter(targeting => getKeys(targeting)[0] === adUnitCode)
+  return getAllTargeting(auction).filter(targeting => getKeys(targeting)[0] === adUnitCode)
     .map(targeting => {
       return {
         [Object.keys(targeting)[0]]: targeting[Object.keys(targeting)[0]]
@@ -212,10 +208,10 @@ pbjs.getAdserverTargetingForAdUnitCode = function (adUnitCode) {
           }).reduce((p, c) => Object.assign(c, p), {})
       };
     })
-    .reduce(function (accumulator, targeting) {
+    .reduce(function (allTargeting, targeting) {
       var key = Object.keys(targeting)[0];
-      accumulator[key] = Object.assign({}, accumulator[key], targeting[key]);
-      return accumulator;
+      allTargeting[key] = Object.assign({}, allTargeting[key], targeting[key]);
+      return allTargeting;
     }, {})[adUnitCode];
 };
 
@@ -254,8 +250,9 @@ pbjs.getAdserverTargeting = function () {
 pbjs.getBidResponses = function () {
   utils.logInfo('Invoking pbjs.getBidResponses', arguments);
 
-  return pbjs._bidsReceived.map(bid => bid.adUnitCode)
-    .filter(uniques).map(adUnitCode => pbjs._bidsReceived
+  const auction = auctionManager.getSingleAuction();
+  return auction.getBidsReceived().map(bid => bid.adUnitCode)
+    .filter(uniques).map(adUnitCode => auction.getBidsReceived()
       .filter(bid => bid.adUnitCode === adUnitCode))
     .map(bids => {
       return {
@@ -272,8 +269,8 @@ pbjs.getBidResponses = function () {
  * @return {Object}            bidResponse object
  */
 
-pbjs.getBidResponsesForAdUnitCode = function (adUnitCode) {
-  const bids = pbjs._bidsReceived.filter(bid => bid.adUnitCode === adUnitCode);
+pbjs.getBidResponsesForAdUnitCode = function (adUnitCode, auction) {
+  const bids = auction.getBidsReceived().filter(bid => bid.adUnitCode === adUnitCode);
   return {
     bids: bids
   };
@@ -297,7 +294,7 @@ pbjs.setTargetingForGPTAsync = function () {
       .forEach(targeting => targeting[Object.keys(targeting)[0]]
         .forEach(key => {
           key[Object.keys(key)[0]]
-            .map((value, index, array) => {
+            .map((value) => {
               utils.logMessage(`Attempting to set key value for slot: ${slot.getSlotElementId()} key: ${Object.keys(key)[0]} value: ${value}`);
               return value;
             })
@@ -322,13 +319,13 @@ pbjs.allBidsAvailable = function () {
  * @param  {string} id bid id to locate the ad
  * @alias module:pbjs.renderAd
  */
-pbjs.renderAd = function (doc, id) {
+pbjs.renderAd = function (doc, id, auction) {
   utils.logInfo('Invoking pbjs.renderAd', arguments);
   utils.logMessage('Calling renderAd with adId :' + id);
   if (doc && id) {
     try {
       //lookup ad by ad Id
-      var adObject = pbjs._bidsReceived.find(bid => bid.adId === id);
+      var adObject = auction.getBidsReceived().find(bid => bid.adId === id);
       if (adObject) {
         //emit 'bid won' event here
         events.emit(BID_WON, adObject);
@@ -396,6 +393,7 @@ pbjs.removeAdUnit = function (adUnitCode) {
  * @param timeout
  */
 pbjs.requestBids = function ({ bidsBackHandler, timeout }) {
+  const auction = auctionManager.getSingleAuction();
   const cbTimeout = timeout || pbjs.bidderTimeout;
 
   if (typeof bidsBackHandler === objectType_function) {
@@ -404,7 +402,7 @@ pbjs.requestBids = function ({ bidsBackHandler, timeout }) {
 
   utils.logInfo('Invoking pbjs.requestBids', arguments);
 
-  if (!pbjs.adUnits || pbjs.adUnits.length === 0) {
+  if (auction.getAdUnits().length === 0) {
     utils.logMessage('No adUnits configured. No bids requested.');
     return;
   }
@@ -412,8 +410,7 @@ pbjs.requestBids = function ({ bidsBackHandler, timeout }) {
   //set timeout for all bids
   setTimeout(bidmanager.executeCallback, cbTimeout);
 
-  auction1.setAdUnits(pbjs.adUnits);
-  auction1.callBids();
+  auction.callBids();
 };
 
 /**
@@ -423,12 +420,15 @@ pbjs.requestBids = function ({ bidsBackHandler, timeout }) {
  * @alias module:pbjs.addAdUnits
  */
 pbjs.addAdUnits = function (adUnitArr) {
+  const auction = auctionManager.getSingleAuction();
+
   utils.logInfo('Invoking pbjs.addAdUnits', arguments);
+
   if (utils.isArray(adUnitArr)) {
     //append array to existing
-    pbjs.adUnits.push.apply(pbjs.adUnits, adUnitArr);
+    auction.setAdUnits(adUnitArr);
   } else if (typeof adUnitArr === objectType_object) {
-    pbjs.adUnits.push(adUnitArr);
+    auction.setAdUnits([adUnitArr]);
   }
 };
 
@@ -523,17 +523,17 @@ pbjs.registerBidAdapter = function (bidderAdaptor, bidderCode) {
   }
 };
 
-pbjs.bidsAvailableForAdapter = function ({ auction, bidderCode }) {
+pbjs.bidsAvailableForAdapter = function (bidderCode, auction) {
   utils.logInfo('Invoking pbjs.bidsAvailableForAdapter', arguments);
 
-  pbjs._bidsRequested.find(bidderRequest => bidderRequest.bidderCode === bidderCode).bids
+  auction.getBidderRequests().find(bidderRequest => bidderRequest.bidderCode === bidderCode).bids
     .map(bid => {
       return Object.assign(bidfactory.createBid(1), bid, {
         bidderCode,
         adUnitCode: bid.placementCode
       });
     })
-    .map(bid => pbjs._bidsReceived.push(bid));
+    .map(bid => auction.getBidsReceived().push(bid));
 };
 
 /**
@@ -620,5 +620,7 @@ pbjs.setPriceGranularity = function (granularity) {
 pbjs.enableSendAllBids = function () {
   pb_sendAllBids = true;
 };
+
+pbjs.auctionManager = auctionManager;
 
 processQue();

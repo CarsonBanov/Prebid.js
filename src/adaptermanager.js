@@ -1,8 +1,8 @@
 /** @module adaptermanger */
+var utils = require('./utils.js');
 
 import { flatten, uniques } from './utils';
 
-var utils = require('./utils.js');
 var bidfactory = require('./bidfactory.js');
 var CONSTANTS = require('./constants.json');
 var events = require('./events');
