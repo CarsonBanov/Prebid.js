@@ -40,10 +40,6 @@ var OpenxAdapter = function OpenxAdapter(options) {
       if (bid.params.pgid) {
         opts.pgid = bid.params.pgid;
       }
-
-      if (bid.params.be) {
-        opts.be = bid.params.be;
-      }
     }
 
     _requestBids();
@@ -68,13 +64,12 @@ var OpenxAdapter = function OpenxAdapter(options) {
           POX.addPage(opts.pgid);
         }
 
-        if (opts.be) {
-          POX.setBidderEligibility(true);
-        }
-
         // Add each ad unit ID
         for (i = 0; i < bids.length; i++) {
           POX.addAdUnit(bids[i].params.unit);
+          if (bids[i].params.slot_id) {
+            POX.setAdUnitSlotId(bids[i].params.unit, bids[i].params.slot_id);
+          }
         }
 
         POX.addHook(function (response) {
