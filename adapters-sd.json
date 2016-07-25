@@ -1,0 +1,20 @@
+[
+    "aardvark",
+    "admedia",
+    "aol",
+    "appnexus",
+    "indexExchange",
+    "openx",
+    "pubmatic",
+    "pulsepoint",
+    "rubicon",
+    "sonobi",
+    "sovrn",
+    "triplelift",
+    "yieldbot",
+    {
+      "appnexus": {
+        "alias": "brealtime"
+      }
+    }
+]
