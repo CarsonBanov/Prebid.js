@@ -8,12 +8,13 @@ var allPlacementCodes;
 /**
  * Adapter for requesting bids from Conversant
  */
-var ConversantAdapter = function ConversantAdapter() {
+var ConversantAdapter = function() {
   var bidsMap = {};
   var w = window;
   var n = navigator;
   var browser = detect();
 
+  // production endpoint
   var conversantUrl = location.protocol + '//media.msg.dotomi.com/s2s/header';
 
   // SSAPI returns JSONP with window.pbjs.conversantResponse as the cb
@@ -31,7 +32,7 @@ var ConversantAdapter = function ConversantAdapter() {
     }
   };
 
-  var httpPOSTAsync = function (url, data) {
+  var httpPOSTAsync = function (url, data){
     var xmlHttp = new w.XMLHttpRequest();
 
     xmlHttp.onload = function() {
@@ -46,7 +47,6 @@ var ConversantAdapter = function ConversantAdapter() {
   };
 
   var getDevice = function(){
-
     return {
       devicetype: (function(){
         if (browser.details.desktop){
@@ -66,10 +66,9 @@ var ConversantAdapter = function ConversantAdapter() {
       language: n.language.split('-')[0],
       make: n.vendor ? n.vendor : '',
       os: browser.details.os.name,
-      osv: browser.details.os.version + '',
+      osv: browser.details.os.version+'',
       ua: n.userAgent
     };
-
   };
 
   var callBids = function (params) {
@@ -147,76 +146,77 @@ var ConversantAdapter = function ConversantAdapter() {
     });
   };
 
+  var parseSeatbid = function(bidResponse){
+    var placementsWithBidsBack = [];
+    utils._each(bidResponse.bid, function (conversantBid){
+      var responseCPM;
+      var placementCode = '';
+      var id = conversantBid.impid;
+      var bid = {};
+
+      // Bid request we sent Conversant
+      var bidObj = bidsMap[id];
+      if (bidObj) {
+        placementCode = bidObj.placementCode;
+        placementsWithBidsBack.push(placementCode);
+        bidObj.status = CONSTANTS.STATUS.GOOD;
+
+        // Register bid response with bidmanager
+        responseCPM = parseFloat(conversantBid.price);
+
+        if (responseCPM !== 0.0) {
+          conversantBid.placementCode = placementCode;
+          conversantBid.size = bidObj.sizes;
+          var responseAd = conversantBid.adm || '';
+          var responseNurl = conversantBid.nurl || '';
+
+          // Our bid!
+          bid = bidfactory.createBid(1);
+          bid.creative_id = conversantBid.id || '';
+          bid.bidderCode = 'conversant';
+
+          bid.cpm = responseCPM;
+
+          // Track impression image onto returned html and decode
+          // Using bid.ad as the server returns HTML snippets.  Can also return url to ad in bid.adurl
+          bid.ad =  responseAd + '<img src=\"' + responseNurl + '\" />';
+
+
+          var sizeArrayLength = bidObj.sizes.length;
+          if (sizeArrayLength === 2 && typeof bidObj.sizes[0] === 'number' && typeof bidObj.sizes[1] === 'number') {
+            bid.width = bidObj.sizes[0];
+            bid.height = bidObj.sizes[1];
+          } else {
+            bid.width = bidObj.sizes[0][0];
+            bid.height = bidObj.sizes[0][1];
+          }
+
+          bidmanager.addBidResponse(placementCode, bid);
+
+        } else {
+          //0 price bid
+          //indicate that there is no bid for this placement
+          bid = bidfactory.createBid(2);
+          bid.bidderCode = 'conversant';
+          bidmanager.addBidResponse(placementCode, bid);
+
+        }
+      } else { // bid not found, we never asked for this?
+        //no response data
+        bid = bidfactory.createBid(2);
+        bid.bidderCode = 'conversant';
+        bidmanager.addBidResponse(placementCode, bid);
+      }
+    });
+    addBlankBidResponsesForAllPlacementsExceptThese(placementsWithBidsBack);
+  };
+
   // Register our callback to the global object:
   w.pbjs.conversantResponse = function(conversantResponseObj) {
-    var placementsWithBidsBack = [];
     // valid object?
     if (conversantResponseObj && conversantResponseObj.id) {
-      // valid object w/
       if (conversantResponseObj.seatbid && conversantResponseObj.seatbid.length > 0 && conversantResponseObj.seatbid[0].bid && conversantResponseObj.seatbid[0].bid.length > 0) {
-        utils._each(conversantResponseObj.seatbid, function(bidResponse){
-          utils._each(bidResponse.bid, function (conversantBid){
-            var responseCPM;
-            var placementCode = '';
-            var id = conversantBid.impid;
-            var bid = {};
-
-            // Bid request we sent Conversant
-            var bidObj = bidsMap[id];
-            if (bidObj) {
-              placementCode = bidObj.placementCode;
-              placementsWithBidsBack.push(placementCode);
-              bidObj.status = CONSTANTS.STATUS.GOOD;
-
-              // Register bid response with bidmanager
-              responseCPM = parseFloat(conversantBid.price);
-
-              if (responseCPM >= 0.0) {
-                conversantBid.placementCode = placementCode;
-                conversantBid.size = bidObj.sizes;
-                var responseAd = conversantBid.adm || '';
-                var responseNurl = conversantBid.nurl || '';
-
-                // Our bid!
-                bid = bidfactory.createBid(1);
-                bid.creative_id = conversantBid.id;
-                bid.bidderCode = 'conversant';
-
-                bid.cpm = responseCPM;
-
-                // Track impression image onto returned html and decode
-                // Using bid.ad as the server returns HTML snippets.  Can also return url to ad in bid.adurl
-                bid.ad = responseAd + responseNurl;
-
-
-                var sizeArrayLength = bidObj.sizes.length;
-                if (sizeArrayLength === 2 && typeof bidObj.sizes[0] === 'number' && typeof bidObj.sizes[1] === 'number') {
-                  bid.width = bidObj.sizes[0];
-                  bid.height = bidObj.sizes[1];
-                } else {
-                  bid.width = bidObj.sizes[0][0];
-                  bid.height = bidObj.sizes[0][1];
-                }
-
-                bidmanager.addBidResponse(placementCode, bid);
-
-              } else {
-                //0 price bid
-                //indicate that there is no bid for this placement
-                bid = bidfactory.createBid(2);
-                bid.bidderCode = 'conversant';
-                bidmanager.addBidResponse(placementCode, bid);
-
-              }
-            } else { // bid not found, we never asked for this?
-              //no response data
-              bid = bidfactory.createBid(2);
-              bid.bidderCode = 'conversant';
-              bidmanager.addBidResponse(placementCode, bid);
-            }
-          });
-        });
-        addBlankBidResponsesForAllPlacementsExceptThese(placementsWithBidsBack);
+        utils._each(conversantResponseObj.seatbid, parseSeatbid);
       } else {
         //no response data for any placements
         addBlankBidResponsesForAllPlacementsExceptThese([]);
@@ -790,6 +790,8 @@ var getAppleOS = function (win, ua) {
       iOSVersion = DEFAULT_VERSION,
       macVersion = DEFAULT_VERSION;
 
+  // Mozilla/5.0 (iPhone; CPU iPhone OS 7_1 like Mac OS X) AppleWebKit/537.51.2 (KHTML, like Gecko) Version/7.0 Mobile/11D167 Safari/9537.53
+  // webviews will not have Safari in their user-agent string
   if ((iOS.test(ua) || iOS.test(win.navigator.platform)) || !looksLike(/Safari|Firefox|Chrome/i, ua)) {
     if (!looksLike(/Version\/\d\.\d/i, ua)) {
       appleBrowser.ua.version = '2.0';
@@ -1006,22 +1008,34 @@ var detect = function (win, userAgent) {
   // see if this is a mobile browser
   detectedBrowser.mobile = isMobile(w);
 
+  // run thru mobile detection first if applicable
   if (detectedBrowser.mobile) {
+    // MS Surfaces pass the mobile test, so we account for them here
+    // IE Mobile sometimes contain touch in the UA
     if (looksLike(/Win/i, ua) && looksLike(/Touch/i, ua) && !looksLike(/IEMobile/i, ua)) {
       browserType = TYPE.MICROSOFT;
+      // Kindle feature support varies greatly, and they retain low market-share, so we trust the user agent for now
     } else if (looksLike(kindleBrowser, ua)) {
       browserType = TYPE.KINDLE;
     } else if (can(nav, 'permissions')) {
+      // Chrome is the only mobile platform with permissions
       browserType = TYPE.CHROME_MOBILE;
     } else if (has('ondevicelight', w)) {
+      // Only FF Mobile has the ambient light API
       browserType = TYPE.FIREFOX_MOBILE;
     } else if (has('setImmediate', w)) {
+      // IE is the only mobile with setImmediate
       browserType = TYPE.MICROSOFT_MOBILE;
     } else if (!has('matchMedia', w)) {
+      // only Opera Mini lacks matchMedia, thanks for making this easy Opera!
       browserType = TYPE.OPERA_MINI;
     } else if (has('speechSynthesis', w) && !has('Intl', w)) {
+      // iOS has never supported the Intl api
+      // iOS Safari has speech synth support that goes way back to older versions too
       browserType = TYPE.SAFARI_MOBILE;
     } else if (has('isFinite', w) || can(has('connection', nav), 'type')) {
+      // Android is the only remaining one with isFinite
+      // Very old Android supports nav.connection.type
       if (mathMLSupport(d)) {
         // Detect mathML to find webviews reporting themselves as Android
         browserType = TYPE.WEBVIEW;
